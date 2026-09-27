@@ -1,0 +1,15 @@
+{
+  "started_at": "2026-09-27T05:26:19.842788+00:00",
+  "database_down": {
+    "ingestion_status": 202,
+    "health_status": 200,
+    "ready_status": 503
+  },
+  "worker_sigkill_recovery": "original pending event persisted after restart",
+  "redis_down": {
+    "ingestion_status": 503,
+    "health_status": 200,
+    "ready_status": 503
+  },
+  "completed_at": "2026-09-27T05:26:53.531214+00:00"
+}
