@@ -212,6 +212,14 @@ After correction: `make check`, `make test` (30 passed / 13 skipped), and
 `make integration` (**43 passed**, including 13 real-service integration tests).
 The only warning is the existing upstream Starlette test-client deprecation.
 
+[Pull request #1](https://github.com/Fahao1/cloud-log-ingestion-incident-detection/pull/1)
+contains these corrections and remains unmerged.
+[GitHub Actions run 36300086438](https://github.com/Fahao1/cloud-log-ingestion-incident-detection/actions/runs/36300086438)
+passed both jobs on implementation commit `49192b474ea4570fc6bf33b191af53ebb0b71ac5`:
+formatting/lint, **43 pytest tests**, fresh Compose build/start/migration/smoke,
+and the search-access-log privacy check. Subsequent audit documentation updates
+use the same workflow; the PR's checks show the latest head result.
+
 The patched Docker build was started with fresh audit-only volumes using the
 same README command; migrations, readiness and smoke passed. Original project
 volumes and historical benchmark evidence were preserved.

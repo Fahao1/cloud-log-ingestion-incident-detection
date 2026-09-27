@@ -22,8 +22,8 @@ verified result:
 - Established a reproducible validation workflow using Docker Compose, pytest,
   Ruff, and GitHub Actions, exercising commit/ack failure boundaries, malformed
   inputs, and memory-pressure recovery; 43 automated tests and a fresh Compose
-  smoke test passed locally. The original CI ran 26 tests; see the audit PR's
-  checks for the expanded suite. Separate local exercises verified dependency outages.
+  smoke test passed locally and in GitHub Actions. Separate local exercises
+  verified dependency outages; see [the audit evidence](audit.md).
 
 The first bullet's throughput is local burst throughput, not production capacity.
 It applies to the source hashes in the original evidence, not to later audit fixes.
