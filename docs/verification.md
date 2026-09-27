@@ -18,6 +18,10 @@ containers. This file distinguishes executed checks from deployment plans.
   worker persistence, full-text search, and duplicate UUID checks passed.
 - Three 2,000-event load runs: 6,000 accepted and observed committed; zero request
   failures. Full evidence and measurement caveats: [benchmark.md](benchmark.md).
+- `docker compose exec -T api python -m scripts.generate_events --events 120 --interval 0.5`:
+  all 120 requests accepted. The default detector opened a `checkout` incident
+  after its sustain interval, with 43 errors among 86 events in the evaluated
+  window (50%); the incident was returned by `GET /incidents?service=checkout`.
 
 Integration tests apply migrations twice, use a temporary database and isolated
 Redis keys, and remove them afterward. Test source is in `tests/`. Runtime
@@ -48,9 +52,22 @@ relative documentation links resolved, the upstream MIT notice was present,
 and `.env`, virtual environments, caches, build outputs, and ad-hoc artifacts
 were excluded. This was a targeted review, not a full security audit.
 
-The workflow runs lint/format and integration tests, plus an independent Compose
-build/start/smoke job. Publication and the remote Actions result are recorded after
-the initial push. Repository: https://github.com/Fahao1/cloud-log-ingestion-incident-detection
+The public repository is
+[Fahao1/cloud-log-ingestion-incident-detection](https://github.com/Fahao1/cloud-log-ingestion-incident-detection).
+An unauthenticated request returned HTTP 200. The README's formatted content and
+Mermaid architecture diagram were inspected in the browser and rendered successfully.
+
+[Initial GitHub Actions run](https://github.com/Fahao1/cloud-log-ingestion-incident-detection/actions/runs/36297388183)
+passed both jobs on Ubuntu:
+
+- `tests`: formatting/lint passed; **26 tests passed** in 1.49 seconds (one upstream
+  deprecation warning).
+- `compose`: fresh image build, dependency startup, migration, health checks, and
+  HTTP ingestion/search/deduplication smoke test passed.
+
+That run tested implementation commit `c3ce90a712f45bb3d533eb187365fdd2be7d6b87`.
+Follow-up documentation changes use the same workflow; the README badge links to
+the latest result.
 
 No cloud provider account was used and no cloud deployment is claimed. See the
 README deployment procedure for the remaining infrastructure, TLS, secret-store,

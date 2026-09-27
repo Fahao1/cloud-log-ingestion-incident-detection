@@ -21,8 +21,8 @@ verified result:
   verified concurrent detection, cooldown, and healthy-window reset in integration tests.
 - Established a reproducible validation workflow using Docker Compose, pytest,
   Ruff, and GitHub Actions, exercising dependency outages and commit/ack failure
-  boundaries; 26 local automated tests passed, with remote CI evidence linked in
-  the repository after publication.
+  boundaries; 26 automated tests and a fresh Compose smoke test passed in GitHub
+  Actions as well as local verification.
 
 The first bullet's throughput is local burst throughput, not production capacity.
 Per-run median acceptance-to-observed-commit latency was 16.7–17.7 ms and p95 was

@@ -75,7 +75,7 @@ need its plugin directory added to Docker's `cliPluginsExtraDirs` configuration.
 ## Architecture and data flow
 
 ```mermaid
-flowchart LR
+flowchart TD
     C[Application / event generator] -->|POST /events| A[FastAPI]
     A -->|validate; bounded XADD| R[(Redis Stream)]
     R -->|XREADGROUP / XAUTOCLAIM| W[Worker]
