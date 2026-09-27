@@ -10,6 +10,8 @@ Redis Streams, Docker Compose, pytest, and GitHub Actions.
 This is an AI-assisted portfolio project with executable failure tests and
 measured local performance. It is not evidence of production operation or cloud
 deployment. The repository documents exactly what was adapted and verified.
+An [independent audit](docs/audit.md) records reproduced bugs, focused fixes,
+fresh-checkout verification, and remaining limits.
 
 ## Quick start
 
@@ -127,6 +129,8 @@ Severities: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (case-sensitive).
 Service names: 1–100 ASCII letters, digits, underscores, dots, or hyphens, starting
 with a letter or digit. Messages: 1–8,192 characters, within the whole-body limit.
 Metadata: a JSON object; do not send passwords, tokens, or personal data.
+Timestamps are normalized to UTC and must remain within years 1–9999 after
+conversion. Invalid cursors, NUL-containing filters, and out-of-range dates return 422.
 
 Search results contain `items` and `next_cursor`. Pass `next_cursor` back with the
 same filters. Ordering is `(timestamp DESC, event_id DESC)`, so equal timestamps
@@ -180,6 +184,13 @@ events table. Poison messages and exhausted retries are quarantined in the DLQ.
   whichever limit is reached first rejects writes. Slow/pending events are not
   deliberately removed to make room. Successful entries are deleted, so stream
   length includes both unread and pending backlog.
+- **Redis logical memory pressure:** ingestion still rejects new writes. Consumer
+  finalization and small retry/failure records use Redis Lua's `allow-oom` flag
+  so existing work can drain, including movement to the DLQ. These bounded
+  per-delivery operations can temporarily exceed `maxmemory`; it is not a hard
+  process memory cap. DLQ storage still requires operator-owned retention and
+  headroom. Physical RAM exhaustion, a container memory kill, disk-full errors,
+  or missing stream/group state under OOM still require operator recovery.
 
 Redis runs with AOF `appendfsync everysec`. A host/Redis crash can lose roughly the
 last second of writes, including events already acknowledged to HTTP clients;
@@ -224,8 +235,10 @@ the timer because missing observations cannot establish continuity.
 This is a configurable sustained threshold detector, **not adaptive anomaly
 detection or a comparison with a historical baseline**. It samples rolling
 windows; it cannot prove the threshold held between samples. It uses server
-receipt time to avoid client clock errors and historical replay triggering
-current incidents. Detection only sees committed events, so a storage backlog
+receipt time to avoid client clock errors. Replaying old client timestamps with
+new UUIDs counts as new traffic and can trigger current incidents. Retrying an
+already-stored UUID preserves its original receipt time and does not add a row.
+Detection only sees committed events, so a storage backlog
 can delay or suppress alerts when receipts age out of the window.
 
 Incidents retain observed counts, ratio, breach start, open time, and the complete
@@ -288,6 +301,9 @@ Actions. Integration tests create a uniquely named temporary PostgreSQL database
 and isolated Redis keys, then remove them. The test PostgreSQL user needs
 `CREATEDB`; never point test settings at production. No mock Redis/SQLite
 substitutes are used in the integration suite.
+The memory-pressure regression temporarily changes Redis's **server-wide**
+`maxmemory` and restores it in `finally`; use disposable development/CI services
+without unrelated clients. These tests are not intended for parallel pytest runs.
 
 Coverage includes validation/size/auth, real ingestion and search, tied-timestamp
 pagination, concurrent duplicate delivery, commit/ack crash recovery, abandoned
@@ -303,7 +319,7 @@ To run application processes directly instead of containers:
 ```sh
 docker compose up -d postgres redis
 .venv/bin/python -m app.migrate
-.venv/bin/uvicorn app.main:app --port 8000
+.venv/bin/uvicorn app.main:app --port 8000 --no-access-log
 # In another terminal:
 .venv/bin/python -m app.worker
 ```
@@ -352,9 +368,14 @@ Reported latencies are **upper bounds on acceptance-to-commit latency**, inclusi
 of observation overhead. The observer re-reads each run's rows for correctness
 under out-of-order commits; it can affect throughput and should be redesigned
 for million-event tests. Percentiles use nearest rank; median uses the usual
-middle-value average. Incomplete/error/negative-latency runs exit nonzero.
+middle-value average. Incomplete/error/negative-latency runs exit nonzero after
+saving partial evidence. `--timeout` (120 seconds by default) bounds connection,
+submission, and observation work together; cancellation joins outstanding tasks.
+A canceled HTTP request may already have reached Redis, so partial runs cannot
+establish the total number of events accepted by the server.
 
-**Measured on an Apple M4 Pro with a 4-vCPU/6-GiB Colima VM:** three 2,000-event
+**Historical baseline, before the audit fixes:** on an Apple M4 Pro with a
+4-vCPU/6-GiB Colima VM, three 2,000-event
 bursts accepted and persisted all 6,000 events with zero request failures. One
 worker achieved **566–570 persisted events/second**, with per-run median
 acceptance-to-observed-commit latency **16.7–17.7 ms** and p95 **40.8–43.1 ms**.
@@ -403,7 +424,11 @@ termination, retention jobs or partitions, automated DLQ replay, backups,
 replication/failover, dashboards, external notifications, incident resolution,
 adaptive baselines, OTLP compatibility, or a long-running soak/failover test.
 Log content and metadata are stored as submitted; no automatic PII/secret
-redaction is claimed. All event/incident/DLQ history requires an operator-owned
+redaction is claimed. The image and documented local command disable Uvicorn
+access logs because search URLs can contain sensitive terms. Configure any
+reverse proxy to omit query strings and credentials from its own logs. Worker
+incident logs include service names and counts; dead letters retain original
+payloads (possibly non-UTF-8 bytes). All event/incident/DLQ history requires an operator-owned
 retention policy. More consumer groups and Redis Cluster are unsupported by
 the current key/script layout.
 

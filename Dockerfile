@@ -12,4 +12,4 @@ COPY LICENSE THIRD_PARTY.md ./
 RUN useradd --create-home --uid 10001 service && chown -R service:service /service
 USER service
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

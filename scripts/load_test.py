@@ -48,16 +48,13 @@ async def run(args):
     ]
     seen, accepted, failures, poll_gaps = {}, set(), [], []
     done = asyncio.Event()
-    conn = await psycopg.AsyncConnection.connect(
-        s.database_url, autocommit=True, row_factory=dict_row
-    )
-    db_version = (await (await conn.execute("SHOW server_version")).fetchone())["server_version"]
+    conn, db_version, submission_seconds = None, None, None
     started_at = datetime.now(UTC).isoformat()
     started = time.perf_counter()
 
     async def observe():
         last_poll = time.perf_counter()
-        while time.perf_counter() - started < args.timeout:
+        while True:
             # ponytail: scan this run's rows; use batched ID probes for million-event benchmarks.
             cursor = await conn.execute(
                 "SELECT event_id, accepted_at, clock_timestamp() AS observed_at "
@@ -82,37 +79,67 @@ async def run(args):
                 return
             await asyncio.sleep(args.poll_ms / 1000)
 
-    try:
-        observer = asyncio.create_task(observe())
+    async def produce(client):
+        nonlocal submission_seconds
         iterator = iter(payloads)
-        async with httpx.AsyncClient(
-            base_url=args.url,
-            headers={
-                "X-API-Key": os.getenv("API_KEY", s.api_key),
-                "Content-Type": "application/json",
-            },
-            limits=httpx.Limits(max_connections=args.concurrency),
-            timeout=30,
-        ) as client:
 
-            async def send():
-                for body in iterator:
-                    try:
-                        response = await client.post("/events", content=body)
-                        response.raise_for_status()
-                        if response.status_code != 202:
-                            raise ValueError("expected 202")
-                        accepted.add(response.json()["event_id"])
-                    except (httpx.HTTPError, ValueError) as exc:
-                        failures.append(type(exc).__name__)
+        async def send():
+            for body in iterator:
+                try:
+                    response = await client.post("/events", content=body)
+                    response.raise_for_status()
+                    if response.status_code != 202:
+                        raise ValueError("expected 202")
+                    accepted.add(response.json()["event_id"])
+                except (httpx.HTTPError, ValueError) as exc:
+                    failures.append(type(exc).__name__)
 
-            await asyncio.gather(*(send() for _ in range(args.concurrency)))
-        submission_seconds = time.perf_counter() - started
-        done.set()
-        await observer
-        total_seconds = time.perf_counter() - started
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                for _ in range(args.concurrency):
+                    tasks.create_task(send())
+        finally:
+            submission_seconds = time.perf_counter() - started
+            done.set()
+
+    def record_failure(exc):
+        if isinstance(exc, ExceptionGroup):
+            for child in exc.exceptions:
+                record_failure(child)
+        else:
+            failures.append(type(exc).__name__)
+
+    try:
+        # One deadline cancels the observer AND producers; TaskGroup joins every task.
+        async with asyncio.timeout(args.timeout):
+            conn = await psycopg.AsyncConnection.connect(
+                s.database_url, autocommit=True, row_factory=dict_row
+            )
+            db_version = (await (await conn.execute("SHOW server_version")).fetchone())[
+                "server_version"
+            ]
+            # Keep successful-run durations comparable to the original workload clock.
+            started_at = datetime.now(UTC).isoformat()
+            started = time.perf_counter()
+            async with httpx.AsyncClient(
+                base_url=args.url,
+                headers={
+                    "X-API-Key": os.getenv("API_KEY", s.api_key),
+                    "Content-Type": "application/json",
+                },
+                limits=httpx.Limits(max_connections=args.concurrency),
+                timeout=30,
+            ) as client:
+                async with asyncio.TaskGroup() as tasks:
+                    tasks.create_task(observe())
+                    tasks.create_task(produce(client))
+    except (TimeoutError, psycopg.Error, ExceptionGroup) as exc:
+        record_failure(exc)
     finally:
-        await conn.close()
+        total_seconds = time.perf_counter() - started
+        submission_seconds = submission_seconds or total_seconds
+        if conn is not None:
+            await conn.close()
     samples = [seen[key] for key in sorted(accepted & seen.keys())]
     values = [sample["latency_ms"] for sample in samples]
     result = {
@@ -138,8 +165,9 @@ async def run(args):
         "acceptance_to_visibility_ms_median": statistics.median(values) if values else None,
         "acceptance_to_visibility_ms_p95": percentile(values, 0.95) if values else None,
         "poll_interval_ms_requested": args.poll_ms,
-        "poll_gap_ms_median": statistics.median(poll_gaps),
-        "poll_gap_ms_p95": percentile(poll_gaps, 0.95),
+        "timeout_seconds": args.timeout,
+        "poll_gap_ms_median": statistics.median(poll_gaps) if poll_gaps else None,
+        "poll_gap_ms_p95": percentile(poll_gaps, 0.95) if poll_gaps else None,
         "measurement": (
             "Redis receipt clock to first PostgreSQL committed-row observation; polling upper bound"
         ),
@@ -180,7 +208,8 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("artifacts/load.json"))
     args = parser.parse_args()
     if (
-        min(
+        not all(math.isfinite(value) for value in (args.poll_ms, args.timeout))
+        or min(
             args.events,
             args.concurrency,
             args.message_bytes,

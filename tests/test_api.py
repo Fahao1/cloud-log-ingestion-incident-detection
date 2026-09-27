@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 from datetime import UTC, datetime
 from unittest.mock import Mock
@@ -37,6 +38,8 @@ def client():
     [
         {"event_id": "bad-id"},
         {"timestamp": "2026-01-01T00:00:00"},
+        {"timestamp": "9999-12-31T23:59:59-01:00"},
+        {"timestamp": "0001-01-01T00:00:00+01:00"},
         {"service": ""},
         {"service": "a service"},
         {"severity": "fatal"},
@@ -131,3 +134,29 @@ def test_bad_filters_and_cursor(client):
     with pytest.raises(Exception) as exc:
         decode_cursor(base64.b64encode(json.dumps(["naive", "no-uuid"]).encode()).decode())
     assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize("invalid_id", [123, [], {}, True])
+def test_structurally_invalid_cursor(client, invalid_id):
+    cursor = base64.urlsafe_b64encode(
+        json.dumps(["2026-01-01T00:00:00Z", invalid_id]).encode()
+    ).decode()
+    assert client.get("/events", params={"cursor": cursor}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "path,params",
+    [
+        ("/events", {"q": "bad\x00text"}),
+        ("/events", {"service": "bad\x00service"}),
+        ("/incidents", {"service": "bad\x00service"}),
+        ("/events", {"start": "0001-01-01T00:00:00+01:00"}),
+        ("/events", {"end": "9999-12-31T23:59:59-01:00"}),
+    ],
+)
+def test_invalid_filters_do_not_reach_database(client, path, params, monkeypatch):
+    def unexpected_connection(*args, **kwargs):
+        raise AssertionError("invalid query reached PostgreSQL")
+
+    monkeypatch.setattr(client.app.state.pool, "connection", unexpected_connection)
+    assert client.get(path, params=params).status_code == 422

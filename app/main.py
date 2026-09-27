@@ -13,11 +13,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from psycopg_pool import PoolTimeout
-from pydantic import AwareDatetime, TypeAdapter
+from pydantic import TypeAdapter
 
 from app.config import Settings
 from app.db import create_pool, search
-from app.models import Event, Severity
+from app.models import Event, SafeText, Severity, Timestamp
 from app.queue import Queue
 
 
@@ -62,8 +62,9 @@ def encode_cursor(row):
 
 def decode_cursor(value):
     try:
-        timestamp, event_id = json.loads(base64.b64decode(value, altchars=b"-_", validate=True))
-        return TypeAdapter(AwareDatetime).validate_python(timestamp), UUID(event_id)
+        return TypeAdapter(tuple[Timestamp, UUID]).validate_json(
+            base64.b64decode(value, altchars=b"-_", validate=True)
+        )
     except (ValueError, TypeError, binascii.Error) as exc:
         raise HTTPException(422, "invalid cursor") from exc
 
@@ -156,11 +157,11 @@ def create_app(settings=None):
     @app.get("/events", dependencies=protected, tags=["events"])
     def events(
         request: Request,
-        service: Annotated[str | None, Query(max_length=100)] = None,
+        service: Annotated[SafeText | None, Query(max_length=100)] = None,
         severity: Severity | None = None,
-        start: AwareDatetime | None = None,
-        end: AwareDatetime | None = None,
-        q: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+        start: Timestamp | None = None,
+        end: Timestamp | None = None,
+        q: Annotated[SafeText | None, Query(min_length=1, max_length=200)] = None,
         cursor: Annotated[str | None, Query(max_length=300)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
@@ -176,7 +177,7 @@ def create_app(settings=None):
     @app.get("/incidents", dependencies=protected, tags=["incidents"])
     def incidents(
         request: Request,
-        service: Annotated[str | None, Query(max_length=100)] = None,
+        service: Annotated[SafeText | None, Query(max_length=100)] = None,
         before_id: Annotated[int | None, Query(ge=1)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
