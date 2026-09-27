@@ -33,7 +33,7 @@ class Worker:
         )
         self.claim_cursor, messages = claimed[:2]
         if messages:
-            r.hincrby(s.metrics_key, "retries_total", len(messages))
+            self.queue.record_retry()
         else:
             response = r.xreadgroup(
                 s.group, self.consumer, {s.stream: ">"}, count=1, block=block_ms
@@ -69,8 +69,7 @@ class Worker:
         except (psycopg.Error, PoolTimeout) as exc:
             # Exception classes/SQLSTATE are useful without leaking payloads or connection strings.
             reason = f"{type(exc).__name__}:{getattr(exc, 'sqlstate', None) or 'unavailable'}"
-            r.hincrby(s.metrics_key, "database_failures_total", 1)
-            r.hset(f"{s.stream}:failures", message_id, reason)
+            self.queue.record_failure(message_id, reason)
             if attempts >= s.max_attempts:
                 self.queue.finish(self.consumer, message_id, fields, "dead", reason)
             log.warning(

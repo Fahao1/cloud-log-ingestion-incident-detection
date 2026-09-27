@@ -32,7 +32,7 @@ def main():
             response.raise_for_status()
             if response.json()["items"]:
                 assert len(response.json()["items"]) == 1
-                print("PASS: readiness, HTTP ingestion, worker persistence, search, deduplication")
+                print("PASS: readiness, HTTP ingestion, worker persistence, search")
                 return
             time.sleep(0.1)
         raise SystemExit("event did not become searchable within 20 seconds")

@@ -3,6 +3,12 @@
 Measured on **2026-09-27 UTC** (September 26 local time), with the actual Compose
 API, worker, PostgreSQL, and Redis processes. No performance values below are
 estimates. This is a short closed-loop workload, not a sustained capacity test.
+These are **historical baseline measurements**, with implementation hashes recorded
+in each raw result. The audit fixes changed application and benchmark code; do
+not present these numbers as measurements of the patched revision. The original
+raw files and summary are preserved unchanged. See [audit.md](audit.md).
+A separately recorded [post-fix verification run](audit.md#separate-post-fix-benchmark-check)
+has its own raw artifact; it is not included in the three-run baseline below.
 
 ## Environment and workload
 

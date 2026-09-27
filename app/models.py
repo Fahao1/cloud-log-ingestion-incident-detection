@@ -1,16 +1,44 @@
-from typing import Literal
+from datetime import UTC
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+)
 
 Severity = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+def utc_timestamp(value):
+    # PostgreSQL accepts years outside Python's range; psycopg cannot read them back.
+    try:
+        return value.astimezone(UTC)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("timestamp must be representable in UTC (years 1 through 9999)") from exc
+
+
+def postgres_text(value):
+    if "\x00" in value:
+        raise ValueError("NUL characters are not supported")
+    value.encode("utf-8")
+    return value
+
+
+Timestamp = Annotated[AwareDatetime, AfterValidator(utc_timestamp)]
+SafeText = Annotated[str, AfterValidator(postgres_text)]
 
 
 class Event(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_id: UUID
-    timestamp: AwareDatetime
+    timestamp: Timestamp
     service: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
     severity: Severity
     message: str = Field(min_length=1, max_length=8192)
@@ -29,9 +57,7 @@ class Event(BaseModel):
         # JSONB/text reject NUL and invalid Unicode; catch them at the trust boundary.
         def check(item):
             if isinstance(item, str):
-                if "\x00" in item:
-                    raise ValueError("NUL characters are not supported")
-                item.encode("utf-8")
+                postgres_text(item)
             elif isinstance(item, dict):
                 for key, child in item.items():
                     check(key)

@@ -11,7 +11,7 @@ verified result:
 - Directed development of an AI-assisted log ingestion service using FastAPI,
   Redis Streams, and PostgreSQL, separating HTTP acceptance from database writes
   to handle bursts; all 6,000 synthetic events persisted across three local runs
-  at 566–570 events/second.
+  at 566–570 events/second on the original implementation (historical local benchmark).
 - Specified and delivered an idempotent processing pipeline using UUID primary
   keys, commit-before-acknowledgment, pending-message recovery, and bounded retries,
   addressing duplicate delivery and worker crashes; verified recovery and
@@ -20,11 +20,15 @@ verified result:
   per-service cooldowns, addressing alert duplication across restarts and workers;
   verified concurrent detection, cooldown, and healthy-window reset in integration tests.
 - Established a reproducible validation workflow using Docker Compose, pytest,
-  Ruff, and GitHub Actions, exercising dependency outages and commit/ack failure
-  boundaries; 26 automated tests and a fresh Compose smoke test passed in GitHub
-  Actions as well as local verification.
+  Ruff, and GitHub Actions, exercising commit/ack failure boundaries, malformed
+  inputs, and memory-pressure recovery; 43 automated tests and a fresh Compose
+  smoke test passed locally. The original CI ran 26 tests; see the audit PR's
+  checks for the expanded suite. Separate local exercises verified dependency outages.
 
 The first bullet's throughput is local burst throughput, not production capacity.
+It applies to the source hashes in the original evidence, not to later audit fixes.
+The audit and fixes also used Codex assistance; describe your role as scoping,
+reviewing, and reproducing the work to the extent you have personally done those things.
 Per-run median acceptance-to-observed-commit latency was 16.7–17.7 ms and p95 was
 40.8–43.1 ms, with polling overhead included. Sustained capacity, cloud deployment,
 availability, and business outcomes **still need verification**. Avoid translating

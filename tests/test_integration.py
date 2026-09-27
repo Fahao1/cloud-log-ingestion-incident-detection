@@ -173,6 +173,73 @@ def test_queue_capacity_does_not_trim_pending_messages(stack):
     assert queue.r.xrange(s.stream)[0] == message
 
 
+def test_non_utf8_payload_is_quarantined_and_next_event_progresses(stack):
+    s, queue, pool, worker, client = stack
+    source_id = queue.r.xadd(s.stream, {"data": b"\xff", "accepted_at": "1"})
+    assert client.post("/events", json=event()).status_code == 202
+    assert worker.step(1) == 1
+    assert worker.step(1) == 1
+    raw = redis.Redis.from_url(s.redis_url)
+    try:
+        dead = raw.xrange(s.dead_stream)[0][1]
+        assert dead[b"data"] == b"\xff"
+        assert dead[b"source_id"].decode() == source_id
+        assert dead[b"reason"] == b"invalid queue payload"
+    finally:
+        raw.close()
+    assert queue.r.xpending(s.stream, s.group)["pending"] == 0
+    assert len(client.get("/events").json()["items"]) == 1
+
+
+def test_memory_pressure_rejects_ingestion_but_allows_recovery(stack):
+    # Only run against disposable test services: maxmemory is server-wide.
+    s, queue, pool, worker, client = stack
+    client.post("/events", json=event())
+    original = queue.r.config_get("maxmemory")["maxmemory"]
+    fail_database(pool)
+    try:
+        queue.r.config_set("maxmemory", 1)
+        assert client.post("/events", json=event()).status_code == 503
+        queue.ensure_group()
+        assert worker.step(1) == 1  # A DB failure still records its reason under Redis OOM.
+        assert queue.r.hget(s.metrics_key, "database_failures_total") == "1"
+        age_pending(s, queue)
+        assert worker.step(1) == 1
+        assert queue.r.xlen(s.dead_stream) == 1
+        assert queue.r.xlen(s.stream) == 0
+        assert queue.r.hget(s.metrics_key, "retries_total") == "1"
+    finally:
+        queue.r.config_set("maxmemory", original)
+    with pool.connection() as conn:
+        conn.execute("DROP TRIGGER test_failure ON events")
+    client.post("/events", json=event())
+    try:
+        queue.r.config_set("maxmemory", 1)
+        assert worker.step(1) == 1  # Commit and successful finalization can drain the queue.
+        assert queue.r.xlen(s.stream) == 0
+        assert queue.r.xpending(s.stream, s.group)["pending"] == 0
+        assert len(client.get("/events").json()["items"]) == 1
+    finally:
+        queue.r.config_set("maxmemory", original)
+
+
+def test_utc_boundaries_round_trip_and_old_client_timestamps_count(stack):
+    s, queue, pool, worker, client = stack
+    for timestamp in (
+        "0001-01-01T00:00:00Z",
+        "9999-12-31T23:59:59.999999Z",
+        "2000-01-01T00:00:00Z",
+        "2000-01-01T00:00:00Z",
+    ):
+        assert client.post("/events", json=event(timestamp=timestamp)).status_code == 202
+        worker.step(1)
+    page = client.get("/events", params={"limit": 1}).json()
+    assert page["items"][0]["timestamp"].startswith("9999-")
+    assert len(client.get("/events", params={"cursor": page["next_cursor"]}).json()["items"]) == 3
+    incident = evaluate(pool, s.model_copy(update={"alert_sustain_seconds": 0}))[0]
+    assert incident["total_events"] == incident["error_events"] == 4
+
+
 def prepare_evaluation(pool, age=3):
     with pool.connection() as conn:
         conn.execute(

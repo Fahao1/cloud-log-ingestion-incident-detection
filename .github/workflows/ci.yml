@@ -39,6 +39,11 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose up --build --wait --wait-timeout 180
       - run: docker compose exec -T api python -m scripts.smoke
+      - name: Search requests must not appear in default access logs
+        run: |
+          if docker compose logs --no-color api | grep -F 'GET /events'; then
+            exit 1
+          fi
       - if: always()
         run: docker compose logs --no-color
       - if: always()

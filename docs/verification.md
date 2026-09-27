@@ -2,6 +2,10 @@
 
 Local verification performed 2026-09-27 UTC on macOS/arm64 with real Docker
 containers. This file distinguishes executed checks from deployment plans.
+This is the original implementation's verification record. The independent
+[audit and subsequent verification](audit.md) correct the smoke-test claim below:
+it observes persistence/search after duplicate submissions, but can return before
+both deliveries finish. Deduplication is verified by the real-service pytest tests.
 
 ## Executed commands
 
@@ -15,7 +19,7 @@ containers. This file distinguishes executed checks from deployment plans.
 - `docker compose up --build --wait --wait-timeout 180`: dependency conditions
   and health checks completed.
 - `docker compose exec -T api python -m scripts.smoke`: readiness, HTTP acceptance,
-  worker persistence, full-text search, and duplicate UUID checks passed.
+  worker persistence and full-text search passed after duplicate UUID submissions.
 - Three 2,000-event load runs: 6,000 accepted and observed committed; zero request
   failures. Full evidence and measurement caveats: [benchmark.md](benchmark.md).
 - `docker compose exec -T api python -m scripts.generate_events --events 120 --interval 0.5`:
@@ -63,7 +67,7 @@ passed both jobs on Ubuntu:
 - `tests`: formatting/lint passed; **26 tests passed** in 1.49 seconds (one upstream
   deprecation warning).
 - `compose`: fresh image build, dependency startup, migration, health checks, and
-  HTTP ingestion/search/deduplication smoke test passed.
+  HTTP ingestion/search smoke test passed; deduplication was covered by pytest.
 
 That run tested implementation commit `c3ce90a712f45bb3d533eb187365fdd2be7d6b87`.
 Follow-up documentation changes use the same workflow; the README badge links to

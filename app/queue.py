@@ -18,8 +18,11 @@ redis.call('HINCRBY', KEYS[2], 'accepted_events_total', 1)
 return {id, accepted}
 """
 
+# Consumer scripts may exceed Redis's *logical* maxmemory to finish existing work.
+# Never allow OOM writes in ENQUEUE: producers must stop while consumers drain.
+# Physical exhaustion/disk errors still require operator intervention.
 # Ownership check fences stale workers; DLQ append / acknowledgment / deletion are atomic.
-FINISH = """
+FINISH = """#!lua flags=allow-oom
 local p = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
 if #p == 0 or p[1][2] ~= ARGV[3] then return 0 end
 if ARGV[4] == 'dead' then
@@ -45,20 +48,47 @@ redis.call('HDEL', KEYS[4], ARGV[2])
 return 1
 """
 
+RETRY = """#!lua flags=allow-oom
+return redis.call('HINCRBY', KEYS[1], 'retries_total', 1)
+"""
+
+FAILURE = """#!lua flags=allow-oom
+redis.call('HINCRBY', KEYS[1], 'database_failures_total', 1)
+redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
+"""
+
 
 class Queue:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.r = redis.Redis.from_url(
-            settings.redis_url, decode_responses=True, socket_timeout=3, socket_connect_timeout=2
+            settings.redis_url,
+            decode_responses=True,
+            encoding_errors="surrogateescape",  # Preserve invalid bytes for validation and DLQ.
+            socket_timeout=3,
+            socket_connect_timeout=2,
         )
 
     def ensure_group(self):
         try:
             self.r.xgroup_create(self.settings.stream, self.settings.group, id="0", mkstream=True)
+        except redis.exceptions.OutOfMemoryError:
+            # Redis can reject CREATE before noticing that the group already exists.
+            if not any(
+                group["name"] == self.settings.group
+                for group in self.r.xinfo_groups(self.settings.stream)
+            ):
+                raise
         except redis.ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    def record_retry(self):
+        self.r.eval(RETRY, 1, self.settings.metrics_key)
+
+    def record_failure(self, message_id, reason):
+        s = self.settings
+        self.r.eval(FAILURE, 2, s.metrics_key, f"{s.stream}:failures", message_id, reason)
 
     def publish(self, event):
         s = self.settings
