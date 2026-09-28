@@ -295,16 +295,3 @@ The existing **566–570 persisted events/s**, **16.7–17.7 ms median** and
 **40.8–43.1 ms p95** are supported as three short historical local bursts.
 Latencies include polling overhead and are upper bounds on commit latency.
 These are not production numbers or measurements of the subsequent fixes.
-
-Resume wording now identifies that baseline explicitly, separates pytest crash
-boundaries from local outage drills, and accurately describes AI-assisted owner
-contribution. Keep authorship wording limited to work personally understood and
-reproduced. Do not claim production availability, zero data loss, reduced incident
-response time, or sole authorship of adapted/assisted components.
-
-Verdict: a useful interview portfolio after reviewing the corrections and learning
-the failure tradeoffs; not established as production-ready. Cloud deployment,
-host-loss durability, disk-full recovery, failover, long-running saturation,
-multiworker performance, production security controls and actual business impact
-remain unverified. Explain the known ceilings rather than claiming this audit
-proves universal correctness.
