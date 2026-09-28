@@ -7,7 +7,7 @@ structured events; developers search persisted logs and inspect incidents when
 a service's error ratio remains high. Built with Python, FastAPI, PostgreSQL,
 Redis Streams, Docker Compose, pytest, and GitHub Actions.
 
-This is an AI-assisted portfolio project with executable failure tests and
+This project contain executable failure tests and
 measured local performance. It is not evidence of production operation or cloud
 deployment. The repository documents exactly what was adapted and verified.
 An [independent audit](docs/audit.md) records reproduced bugs, focused fixes,
